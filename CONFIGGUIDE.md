@@ -1,6 +1,6 @@
 raspi-autoconfig Configuration File Guide
 ================
-`raspi-autoconfig` uses `autoconfig.ini` in the FAT32 boot partition of SD card to change miscellaneous settings of your Raspberr Pi and Raspbian system. 
+`raspi-autoconfig` uses `autoconfig.ini` in the FAT32 boot partition of SD card to change miscellaneous settings of your Raspberry Pi and Raspbian system. 
 
 `raspi-autoconfig` runs only if a valid `autoconfig.ini` exists in the FAT32 boot partition. 
 
@@ -19,9 +19,9 @@ Specify a resolution manually may solve this problem.
 
 Available values:
 
-* Auto: Detect resolution automatically. (Raspberry Pi default behavior)
-* hdmi\_group, hdmi\_value: Specify resolution manually.   
-  For example: "2, 9" represents 800x600 @ 60Hz. 
+* `Auto`: Detect resolution automatically. (Raspberry Pi default behavior)
+* `hdmi_group, hdmi_value`: Specify resolution manually.   
+  For example: `2, 9` represents 800x600 @ 60Hz. 
 
 For a complete list of available hdmi\_group and hdmi\_value settings, see: [Video mode options - RPiconfig - eLinux.org](http://elinux.org/RPiconfig#Video_mode_options). 
 
@@ -36,9 +36,9 @@ You may set this option to "Comp" to ignore any HDMI devices too.
 
 Available options:
 
-* Auto: Use HDMI if a HDMI device is plugged in. (Raspberry Pi default behaviour)
-* HDMI: Forced HDMI output. 
-* Comp: Forced composite output, ignore any HDMI device plugged in. 
+* `Auto`: Use HDMI if a HDMI device is plugged in. (Raspberry Pi default behaviour)
+* `HDMI`: Forced HDMI output. 
+* `Comp`: Forced composite output, ignore any HDMI device plugged in. 
 
 Wired Ethernet [Wired]
 ----------------
@@ -55,17 +55,17 @@ Enable of disable DHCP (aka. IP address automattic detection).
 
 Available options:
 
-* 1: Enable DHCP, detect IP address automatically. (Raspbian default behaviour)
-* 0: Disable DHCP, assign IP address manually. 
+* `1`: Enable DHCP, detect IP address automatically. (Raspbian default behaviour)
+* `0`: Disable DHCP, assign IP address manually. 
 
 ### IP address, subnet mask and default gateway
 Assigns IP address manually with these settings. Available only if `DHCP=0`. 
 
 Example:
 
-* IP=192.168.0.52
-* Subnet=255.255.255.0
-* Gateway=192.168.0.1
+* `IP=192.168.0.52`
+* `Subnet=255.255.255.0`
+* `Gateway=192.168.0.1`
 
 Wi-Fi [Wireless]
 ----------------
@@ -78,8 +78,8 @@ Assign Wi-Fi SSID and paraphrase. Open, WEP, WPA and WPA2 supported. (Passphrase
 
 Example: 
 
-* SSID=BobHome
-* Passphrase=mypassword
+* `SSID=BobHome`
+* `Passphrase=mypassword`
 
 ### DHCP and IP address settings
 The same as wired network settings. 
@@ -97,9 +97,9 @@ The same languages may have multiple different options using different text enco
 
 Available options:
 
-* Locale: A list of supported languages. separated by comma.   
+* `Locale`: A list of supported languages. separated by comma.   
   Example: `Locale=en_US.UTF-8 zh_CN.UTF-8`
-* DefaultLocale: Default language, must exists in supported languages.   
+* `DefaultLocale`: Default language, must exists in supported languages.   
   Example: `DefaultLocale=en_US.UTF-8`
 
 ### Keyboard model layout
@@ -111,8 +111,8 @@ For a list of available model and layout values, see: [RPi Keyboard layout - eLi
 
 Available options: 
 
-* KeyboardModel: Keyboard hardware model. 
-* KeyboardLayout: Keyboard software layout. 
+* `KeyboardModel`: Keyboard hardware model. 
+* `KeyboardLayout`: Keyboard software layout. 
 
 Tip: US users can set `KeyboardModel=pc104` and `KeyboardLayout=us`. 
 
