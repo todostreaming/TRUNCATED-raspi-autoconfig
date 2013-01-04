@@ -1,0 +1,168 @@
+#! /usr/bin/env python3
+
+# raspi-autoconfig 1.0
+#
+# Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) ARM computer. 
+# 
+# Project homepage: http://github.com/shamiao/raspi-autoconfig
+# View README.md file for help. 
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+############################################################
+############  G L O B A L   V A R I A B L E S  #############
+############################################################
+
+import sys # Import globally: for stderr output
+
+# Regex validation rules for configuration file
+RPAC_CONFIG_REGEX = {
+    'Screen': {
+        'Resolution': '^((1,\\s+\\d+)|(2,\\s+\\d+))$', # unsafe match
+        'Output': '^(Auto|HDMI|Comp)$'
+    }, 
+    'Wired': {
+        'DHCP': '^(1|0)$',
+        'IP': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', # unsafe match
+        'Subnet': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', # unsafe match
+        'Gateway': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$' # unsafe match
+    }, 
+    'Wireless': {
+        'SSID': '',
+        'Passphrase': '',
+        'DHCP': '^(1|0)$',
+        'IP': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', # unsafe match
+        'Subnet': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', # unsafe match
+        'Gateway': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$' # unsafe match
+    }, 
+    'Locale': {
+        'Locale': '', # unsafe match
+        'DefaultLocale': '', # unsafe match
+        'KeyboardModel': '', # unsafe match
+        'KeyboardLayout': '', # unsafe match
+        'Timezone': '' # unsafe match
+    },
+    'APT': {
+        'Mirror': '^(https|http|ftp)://[0-9a-zA-Z$\\-_.+!*\'(),/%]+$' # RFC1738. rough match
+    }, 
+    'Remote': {
+        'SSH': '^(1|0)$',
+        'VNC': '^(1|0)$',
+        'VNCPassword': '',
+        'VNCResolution': '^((\\d+)x(\\d+))$'
+    }, 
+    'SimpChinese': {
+        'WQYFont': '^(1|0)$',
+        'SCIMPinyin': '^(1|0)$',
+        'SCIMWubi': '^(1|0)$'
+    }
+}
+
+############################################################
+########## A U X I L I A R Y   F U N C T I O N S  ##########
+############################################################
+
+# System requirements check
+def envreq():
+    # Python 3.0 required (aka: no special check needed)
+    pass
+    
+    # OS, architecture and distribution check. Require:
+    # * Linux operating system
+    # * armv6l hardware architecture
+    # * Debian 7.0 "wheezy" distribution
+    import platform
+    if platform.system() != 'Linux':
+        sys.stderr.write('This program must be run under Linux. \n')
+        return False
+    if not platform.machine().startswith('armv6'):
+        sys.stderr.write('This program must be run under an ARMv6 architecture machine. \n')
+        return False
+    [linux_dist, linux_ver, linux_id] = platform.linux_distribution()
+    if linux_dist != 'Debian' or not linux_ver.startswith('7'):
+        sys.stderr.write('This program must be run under Debian GNU/Linux 7.0/wheezy. \n')
+        return False
+    
+    # Root required
+    import os
+    if not os.geteuid() == 0:
+        sys.stderr.write('This program must be run as root. \n')
+        return False
+    
+    # All requirements OK
+    return True
+# end of envreq()
+
+# Config file load
+def loadconfig(filename='/boot/autoconfig.ini'):
+    import configparser;
+    configfile = configparser.ConfigParser()
+    readret = configfile.read(filename)
+    if len(readret) == 0:
+        sys.stderr.write('Unable to load configuration file \"' + filename + '\". \n')
+        return False
+    return configfile
+# end of loadconfig()
+
+############################################################
+############# C O N F I G   F U N C T I O N S  #############
+############################################################
+
+def setup_screen(configfile):
+    SECNAME = 'Screen'
+    # Run only if [Screen] section exists
+    if not configfile.has_section(SECNAME): return
+    
+    # [Screen].Resolution
+    if configfile.has_option(SECNAME, 'Resolution'):
+        value = configfile.get(SECNAME, 'Resolution')
+        print(value)
+    
+    # [Screen].Output
+    if configfile.has_option(SECNAME, 'Output'):
+        pass
+    
+    return
+# end of setup_screen()
+
+############################################################
+################ M A I N   R O U T L I N E  ################
+############################################################
+
+def main(argv):
+    # System requirements check
+    if not envreq():
+        sys.stderr.write('ERROR: System requirements are not satisfied! \n')
+        return 1
+    
+    # Load config file
+    if (len(sys.argv) < 2):
+        configfile = loadconfig()
+    else:
+        configfile = loadconfig(sys.argv[1])
+    
+    if not configfile:
+        sys.stderr.write('ERROR: Config file read error. \n')
+        return 1
+    
+    # Config routline
+    setup_screen(configfile)
+    
+    # Normal Exit
+    return 0
+# end of main()
+
+if __name__ == '__main__': # Must be run standalone
+    sys.exit(main(sys.argv))
