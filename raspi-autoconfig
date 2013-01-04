@@ -76,8 +76,11 @@ RPAC_CONFIG_REGEX = {
 
 # System requirements check
 def envreq():
-    # Python 3.0 required (aka: no special check needed)
-    pass
+    # Python 3.1 required
+    if sys.hexversion < 0x03010000:
+        sys.stderr.write('Python 3.1 or later version required. ' + 
+            '(Current version: ' + platform.python_version() + ') \n')
+        return False
     
     # OS, architecture and distribution check. Require:
     # * Linux operating system
@@ -91,7 +94,7 @@ def envreq():
         sys.stderr.write('This program must be run under an ARMv6 architecture machine. \n')
         return False
     [linux_dist, linux_ver, linux_id] = platform.linux_distribution()
-    if linux_dist != 'Debian' or not linux_ver.startswith('7'):
+    if linux_dist.lower() != 'debian' or not linux_ver.startswith('7'):
         sys.stderr.write('This program must be run under Debian GNU/Linux 7.0/wheezy. \n')
         return False
     
@@ -122,20 +125,108 @@ def loadconfig(filename='/boot/autoconfig.ini'):
 
 def setup_screen(configfile):
     SECNAME = 'Screen'
-    # Run only if [Screen] section exists
+    # Run only if proper section exists in autoconfig.ini
     if not configfile.has_section(SECNAME): return
+    
+    # Load config.txt
+    try:
+        fcnftxt = open('/boot/config.txt', 'r')
+        cnftxt_cont = fcnftxt.read()
+        fcnftxt.close()
+    except IOError:
+        cnftxt_cont = ''
+    
+    # Regex needed for editing config.txt
+    import re
     
     # [Screen].Resolution
     if configfile.has_option(SECNAME, 'Resolution'):
         value = configfile.get(SECNAME, 'Resolution')
-        print(value)
+        if value.lower() == 'auto':
+            # Comments out "hdmi_ignore_edid", "hdmi_group" & "hdmi_mode"
+            patt = '^(hdmi_ignore_edid)'; repl = '#\g<0>'
+            cnftxt_cont = re.sub(patt, repl, cnftxt_cont, flags=re.M)
+            patt = '^(hdmi_group)'; repl = '#\g<0>'
+            cnftxt_cont = re.sub(patt, repl, cnftxt_cont, flags=re.M)
+            patt = '^(hdmi_mode)'; repl = '#\g<0>'
+            cnftxt_cont = re.sub(patt, repl, cnftxt_cont, flags=re.M)
+        else:
+            m = re.match('^(?P<hdmigroup>1|2),\\s*(?P<hdmimode>\\d+)$', value)
+            if m: # Parsable input (not strictly verified)
+                hdmigroup = int(m.group('hdmigroup'))
+                hdmimode = int(m.group('hdmimode'))
+                # hdmi_mode=1~59 for hdmigroup=1, 1~86 for hdmigroup=2
+                if (hdmigroup==1 and hdmimode>=1 and hdmimode<=59) or \
+                    (hdmigroup==2 and hdmimode>=1 and hdmimode<=86):
+                    # hdmi_group=<var:hdmigroup>
+                    patt = '^.*hdmi_group.*$'
+                    repl = 'hdmi_group=' + str(hdmigroup)
+                    [cnftxt_cont, n] = re.subn(patt, repl, cnftxt_cont, flags=re.M)
+                    # hdmi_mode=<var:hdmimode>
+                    if n == 0: cnftxt_cont += '\n' + repl
+                    patt = '^.*hdmi_mode.*$'
+                    repl = 'hdmi_mode=' + str(hdmimode)
+                    [cnftxt_cont, n] = re.subn(patt, repl, cnftxt_cont, flags=re.M)
+                    if n == 0: cnftxt_cont += '\n' + repl
+                    # hdmi_ignore_edid=0xa5000080
+                    patt = '^.*hdmi_ignore_edid.*$'
+                    repl = 'hdmi_ignore_edid=0xa5000080'
+                    [cnftxt_cont, n] = re.subn(patt, repl, cnftxt_cont, flags=re.M)
+                    if n == 0: cnftxt_cont += '\n' + repl
+                else: # hdmi_mode value out of range
+                    sys.stderr.write('WARN: HDMI_Mode value specified in [Screen].Output out of range. ')
+                sys.stderr.write('FAILED: Resolution unchanged. ')
+                    pass
+            else: # Any other invalid value
+                sys.stderr.write('WARN: Invalid [Screen].Resolution value. ')
+                sys.stderr.write('FAILED: Resolution unchanged. ')
+                pass
+    # end of [Screen].Resolution
     
     # [Screen].Output
     if configfile.has_option(SECNAME, 'Output'):
-        pass
+        value = configfile.get(SECNAME, 'Output')
+        if value.lower() == 'auto':
+            # Comment out "hdmi_force_hotplug" & "hdmi_ignore_hotplug"
+            patt = '^(hdmi_force_hotplug)'; repl = '#\g<0>'
+            cnftxt_cont = re.sub(patt, repl, cnftxt_cont, flags=re.M)
+            patt = '^(hdmi_ignore_hotplug)'; repl = '#\g<0>'
+            cnftxt_cont = re.sub(patt, repl, cnftxt_cont, flags=re.M)
+        elif value.lower() == 'hdmi':
+            # Set "hdmi_force_hotplug=1", comment out "hdmi_ignore_hotplug"
+            patt = '^.*hdmi_force_hotplug.*$'
+            repl = 'hdmi_force_hotplug=1'
+            cnftxt_cont = re.sub(patt, repl, cnftxt_cont, flags=re.M)
+            patt = '^(hdmi_ignore_hotplug)'; repl = '#\g<0>'
+            cnftxt_cont = re.sub(patt, repl, cnftxt_cont, flags=re.M)
+        elif value.lower() == 'comp':
+            # Comment out "hdmi_force_hotplug", set "hdmi_ignore_hotplug=1"
+            patt = '^(hdmi_force_hotplug)'; repl = '#\g<0>'
+            cnftxt_cont = re.sub(patt, repl, cnftxt_cont, flags=re.M)
+            patt = '^.*hdmi_ignore_hotplug.*$'
+            repl = 'hdmi_ignore_hotplug=1'
+            cnftxt_cont = re.sub(patt, repl, cnftxt_cont, flags=re.M)
+        else: # Any other invalid value
+            sys.stderr.write('WARN: Invalid [Screen].Output value. ')
+            sys.stderr.write('FAILED: Output device unchanged. ')
+            pass
+    # end of[Screen].Output
+    
+    # Write back config.txt
+    fcnftxt = open('/boot/config.txt', 'w')
+    fcnftxt.write(cnftxt_cont)
+    fcnftxt.close()
     
     return
 # end of setup_screen()
+
+def setup_wired(configfile):
+    SECNAME = 'Wired'
+    # Run only if proper section exists in autoconfig.ini
+    if not configfile.has_section(SECNAME): return
+    
+    pass # TODO.
+# end of setup_wired
 
 ############################################################
 ################ M A I N   R O U T L I N E  ################
@@ -148,6 +239,8 @@ def main(argv):
         return 1
     
     # Load config file
+    # `/boot/autoconfig.ini` for default,
+    # but can also be customized via command line.
     if (len(sys.argv) < 2):
         configfile = loadconfig()
     else:
