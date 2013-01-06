@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#! /usr/bin/env python3
 
 # raspi-autoconfig 1.0
 #
