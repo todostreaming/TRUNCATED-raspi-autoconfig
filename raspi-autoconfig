@@ -518,9 +518,6 @@ def setup_wireless(configfile):
     cliOK['enable_network'] = subprocess.check_output(['wpa_cli', '-i'+ethdev, 
         'enable_network', netid], universal_newlines=True)
     
-    from pprint import pprint
-    pprint(apinfo)
-    pprint(cliOK)
     # Save config for next boot up - don't forget this!
     subprocess.call(['wpa_cli', '-i'+ethdev, 'save_config'], 
         stdout=open('/dev/null', 'w'))
