@@ -169,7 +169,6 @@ def choose_eth(ethslist):
 #   'subnet': Subnet mask
 #   'gateway': Default gateway
 def dhcp_and_ip_setting(interflist, devname, datadict):
-    from pprint import pprint
     import re
     # Find editing range
     #  Find "iface <devname> inet (static|dhcp|manual)" line
@@ -235,6 +234,8 @@ def setup_screen(configfile):
     if not configfile.has_section(SECNAME): return False
     sys.stdout.write('INFO: Configuring screen... \n')
     
+    reboot = False
+    
     # Load config.txt
     try:
         cnftxt = open('/boot/config.txt', 'r').read()
@@ -259,6 +260,7 @@ def setup_screen(configfile):
             cnftxt = re.sub(patt, repl, cnftxt, flags=re.M)
             patt = '^(hdmi_mode)'; repl = '#\g<0>'
             cnftxt = re.sub(patt, repl, cnftxt, flags=re.M)
+            reboot = True
         else:
             m = re.match('^(?P<hdmigroup>1|2),\\s*(?P<hdmimode>\\d+)$', value)
             if m: # Parsable input (not strictly verified)
@@ -282,15 +284,14 @@ def setup_screen(configfile):
                     repl = 'hdmi_ignore_edid=0xa5000080'
                     [cnftxt, n] = re.subn(patt, repl, cnftxt, 1, flags=re.M)
                     if n == 0: cnftxt += '\n' + repl
+                    reboot = True
                 else: # hdmi_mode value out of range
                     sys.stderr.write('WARN: HDMI_Mode value specified in ' + \
                         '[Screen].Output out of range. \n')
                     sys.stderr.write('FAILED: Resolution unchanged. \n')
-                    pass
             else: # Any other invalid value
                 sys.stderr.write('WARN: Invalid [Screen].Resolution value. \n')
                 sys.stderr.write('FAILED: Resolution unchanged. \n')
-                pass
     # end of [Screen].Resolution
     
     # [Screen].Output
@@ -302,6 +303,7 @@ def setup_screen(configfile):
             cnftxt = re.sub(patt, repl, cnftxt, flags=re.M)
             patt = '^(hdmi_ignore_hotplug)'; repl = '#\g<0>'
             cnftxt = re.sub(patt, repl, cnftxt, flags=re.M)
+            reboot = True
         elif value.lower() == 'hdmi':
             # Set "hdmi_force_hotplug=1", comment out "hdmi_ignore_hotplug"
             patt = '^.*hdmi_force_hotplug.*$'
@@ -310,6 +312,7 @@ def setup_screen(configfile):
             if n == 0: cnftxt += '\n' + repl
             patt = '^(hdmi_ignore_hotplug)'; repl = '#\g<0>'
             cnftxt = re.sub(patt, repl, cnftxt, flags=re.M)
+            reboot = True
         elif value.lower() == 'comp':
             # Comment out "hdmi_force_hotplug", set "hdmi_ignore_hotplug=1"
             patt = '^(hdmi_force_hotplug)'; repl = '#\g<0>'
@@ -318,19 +321,17 @@ def setup_screen(configfile):
             repl = 'hdmi_ignore_hotplug=1'
             [cnftxt, n] = re.subn(patt, repl, cnftxt, 1, flags=re.M)
             if n == 0: cnftxt += '\n' + repl
+            reboot = True
         else: # Any other invalid value
             sys.stderr.write('WARN: Invalid [Screen].Output value. \n')
             sys.stderr.write('FAILED: Output device unchanged. \n')
-            pass
     # end of[Screen].Output
     
     # Write back config.txt
-    fcnftxt = open('/boot/config.txt', 'w')
-    fcnftxt.write(cnftxt)
-    fcnftxt.close()
+    open('/boot/config.txt', 'w').write(cnftxt)
     
     sys.stdout.write('INFO: Screen config complete. \n')
-    return True
+    return reboot
 # end of setup_screen()
 
 def setup_wired(configfile):
@@ -342,7 +343,6 @@ def setup_wired(configfile):
     # Load /etc/network/interfaces
     try:
         interf = open('/etc/network/interfaces', 'r').read().split('\n')
-        #interf = open('interfaces.txt', 'r').read().split('\n') # use temp file in home dir to test
     except:
         sys.stderr.write('FAILED: Unable to read /etc/network/interfaces! \n')
         sys.stderr.write('FAILED: All wired network settings unchanged. \n')
@@ -396,11 +396,138 @@ def setup_wired(configfile):
     
     # Write back changes to /etc/network/interfaces
     open('/etc/network/interfaces', 'w').write('\n'.join(interf)) 
-    # open('interfaces.txt', 'w').write('\n'.join(interf)) # use temp file in home dir to test
+    
+    # Down and up (reset) ethernet device
+    subprocess.call(['ifdown', ethdev])
+    subprocess.call(['ifup', ethdev])
     
     sys.stdout.write('INFO: Wired network config complete. \n')
     return True
 # end of setup_wired
+
+def setup_wireless(configfile):
+    SECNAME = 'Wireless'
+    # Run only if proper section exists in autoconfig.ini
+    if not configfile.has_section(SECNAME): return False
+    sys.stdout.write('INFO: Configuring wireless network... \n')
+    
+    # Requires [Wireless].SSID option. 
+    if configfile.has_option(SECNAME, 'SSID'):
+        ssid = configfile.get(SECNAME, 'SSID');
+    else:
+        sys.stderr.write('WARN: SSID option required for configuring ' + \
+            'wireless network! \n')
+        sys.stderr.write('FAILED: All wireless network settings unchanged. \n')
+        return False
+    
+    # Show all wireless ethernet network cards (eth*)
+    # Fetch `iwconfig` command stdout
+    import subprocess
+    ipoutput = subprocess.check_output(['iwconfig'], universal_newlines=True, \
+        stderr=open('/dev/null', 'w'))
+    # Find device name (wlan*) from output
+    import re
+    patt = '^(?P<dev>\\w+)\\s+IEEE\s*802\\.11'
+    eths = re.findall(patt, ipoutput, flags=re.M) # eg: ['wlan0', 'wlan1']
+    
+    # Count NIC, get device name. 
+    if len(eths) == 1: 
+        # One NIC, use it directly.
+        ethdev = eths[0]
+    elif len(eths) > 1:
+        # Multi NIC, wlan0 preferred
+        sys.stderr.write('WARN: ' + str(len(eths)) + \
+            ' Wi-Fi devices found. \n')
+        if 'wlan0' in eths:
+            ethdev = 'wlan0'
+        else:
+            ethdev = eths[0]
+        sys.stderr.write('INFO: Configuring ' + ethdev + \
+            ' (' + ethmac + '). \n')
+    else:
+        # No NIC
+        sys.stderr.write('WARN: No Wi-Fi device found! \n')
+        sys.stderr.write('FAILED: All wireless network settings unchanged. \n')
+        return False
+    
+    # Scan networks
+    subprocess.call(['iwlist', ethdev, 'scan'], stdout=open('/dev/null', 'w'))
+    aplist = subprocess.check_output(['wpa_cli', '-i'+ethdev, 
+        'scan_results'], universal_newlines=True).split('\n')
+    #  strip leading head line and trailing newline
+    aplist.remove(aplist[0])
+    if '' in aplist: aplist.remove('')
+    #  explode each line by tab char
+    #  (Note: column title: bssid, frequency, signal level, flags, ssid)
+    aplist = [ap.split('\t') for ap in aplist]
+    #  find record with specific ssid
+    apinfo = list(filter(lambda ap: len(ap)==5 and ap[4]==ssid, aplist))
+    if not apinfo: # AP Not found in current area
+        sys.stderr.write('ERROR: Access point \"' + ssid + '\" not found! \n')
+        sys.stderr.write('FAILED: All wireless network settings unchanged. \n')
+        return False
+    #  analyze encryption method
+    if 'wpa' in apinfo[0][3].lower(): # WPA/WPA2 Encryption
+        encryptmethod = 'wpa'
+    elif 'wep' in apinfo[0][3].lower(): # WEP Encryption
+        encryptmethod = 'wep'
+    else:
+        encryptmethod = 'none'
+    
+    # Configure wireless network with wpa_cli
+    cliOK = {};
+    #  config data check: must exists [Wireless].Paraphrase for any encryption
+    if not encryptmethod == 'none':
+        if not configfile.has_option(SECNAME, 'Passphrase'):
+            sys.stderr.write('ERROR: No passphrase provided for ' + \
+                ' WPA/WPA2 encrypted access point \"' + ssid + '\"! \n')
+            sys.stderr.write('FAILED: All wireless network settings unchanged. \n')
+            return False
+        else:
+            passphrase = configfile.get(SECNAME, 'Passphrase');
+    #  create network in wpa_cli
+    netid = subprocess.check_output(['wpa_cli', '-i'+ethdev, 'add_network'], 
+        universal_newlines=True)
+    #  set ssid
+    cliOK['ssid'] = subprocess.check_output(['wpa_cli', '-i'+ethdev, 
+        'set_network', netid, 'ssid', '\"' + ssid + '\"'], 
+        universal_newlines=True)
+    # cliOK['scan_ssid'] = subprocess.check_output(['wpa_cli', '-i'+ethdev, 
+        # 'set_network', netid, 'scan_ssid', '1'], universal_newlines=True)
+    #  set wpa/wpa2/wep encryption
+    if 'wpa' in apinfo[0][3].lower(): # WPA/WPA2 Encryption
+        # only wpa-psk supported in current version
+        cliOK['key_mgmt'] = subprocess.check_output(['wpa_cli', '-i'+ethdev, 
+            'set_network', netid, 'key_mgmt', 'WPA-PSK'], 
+             universal_newlines=True)
+        cliOK['psk'] = subprocess.check_output(['wpa_cli', '-i'+ethdev, 
+            'set_network', netid, 'psk', '"' + passphrase + '"'], 
+             universal_newlines=True)
+    elif 'wep' in apinfo[0][3].lower(): # WEP Encryption
+        cliOK['key_mgmt'] = subprocess.check_output(['wpa_cli', '-i'+ethdev, 
+            'set_network', netid, 'key_mgmt', 'NONE'], 
+             universal_newlines=True)
+        for i in range(4):
+            cliOK['wep_key'+str(i)] = subprocess.check_output(['wpa_cli', 
+                '-i'+ethdev, 'set_network', netid, 'wep_key'+str(i), 
+                '' + passphrase + ''], universal_newlines=True)
+    else: # Open, no encryption
+        pass
+    
+    # Enable network (connect to it automatically)
+    cliOK['enable_network'] = subprocess.check_output(['wpa_cli', '-i'+ethdev, 
+        'enable_network', netid], universal_newlines=True)
+    
+    from pprint import pprint
+    pprint(apinfo)
+    pprint(cliOK)
+    # Save config for next boot up - don't forget this!
+    subprocess.call(['wpa_cli', '-i'+ethdev, 'save_config'], 
+        stdout=open('/dev/null', 'w'))
+    
+    sys.stdout.write('INFO: Wireless network config complete. \n')
+    return False
+# end of setup_wireless
 
 ############################################################
 ################ M A I N   R O U T L I N E  ################
@@ -427,8 +554,10 @@ def main(argv):
     sys.stdout.write(RPAC_SPLASH_STRING)
     
     # Config routline
-    setup_screen(configfile)
-    setup_wired(configfile)
+    reboot = False
+    reboot = reboot or setup_screen(configfile)
+    reboot = reboot or setup_wired(configfile)
+    reboot = reboot or setup_wireless(configfile)
     
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
