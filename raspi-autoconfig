@@ -2,7 +2,8 @@
 
 # raspi-autoconfig 1.0
 #
-# Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) ARM computer. 
+# Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) 
+# ARM computer. 
 # 
 # Project homepage: http://github.com/shamiao/raspi-autoconfig
 # View README.md file for help. 
@@ -26,6 +27,18 @@
 ############################################################
 
 import sys # Import globally: for stderr output
+
+# Splash screen shown at launch of program 
+RPAC_SPLASH_STRING = '''\
+
+************************************************************
+   raspi-autoconfig 1.0
+   Automatic configuration tool for Raspberry Pi (R)
+   
+   http://github.com/shamiao/raspi-autoconfig
+************************************************************
+   
+'''
 
 # Regex validation rules for configuration file
 RPAC_CONFIG_REGEX = {
@@ -55,7 +68,8 @@ RPAC_CONFIG_REGEX = {
         'Timezone': '' # unsafe match
     },
     'APT': {
-        'Mirror': '^(https|http|ftp)://[0-9a-zA-Z$\\-_.+!*\'(),/%]+$' # RFC1738. rough match
+        # RFC1738. rough match
+        'Mirror': '^(https|http|ftp)://[0-9a-zA-Z$\\-_.+!*\'(),/%]+$' 
     }, 
     'Remote': {
         'SSH': '^(1|0)$',
@@ -91,11 +105,14 @@ def envreq():
         sys.stderr.write('This program must be run under Linux. \n')
         return False
     if not platform.machine().startswith('armv6'):
-        sys.stderr.write('This program must be run under an ARMv6 architecture machine. \n')
+        sys.stderr.write('This program must be run under an ARMv6 ' + \
+            'architecture machine. \n')
         return False
     [linux_dist, linux_ver, linux_id] = platform.linux_distribution()
-    if linux_dist.lower() != 'debian' or not linux_ver.startswith('7'):
-        sys.stderr.write('This program must be run under Debian GNU/Linux 7.0/wheezy. \n')
+    if linux_dist.lower() != 'debian' or not (linux_ver.startswith('7') or \
+        linux_ver.find('wheezy') != -1):
+        sys.stderr.write('This program must be run under Debian ' + \
+            'GNU/Linux 7.0/wheezy. \n')
         return False
     
     # Root required
@@ -114,7 +131,8 @@ def loadconfig(filename='/boot/autoconfig.ini'):
     configfile = configparser.ConfigParser()
     readret = configfile.read(filename)
     if len(readret) == 0:
-        sys.stderr.write('Unable to load configuration file \"' + filename + '\". \n')
+        sys.stderr.write('Unable to load configuration file \"' + filename + \
+            '\". \n')
         return False
     return configfile
 # end of loadconfig()
@@ -123,6 +141,7 @@ def loadconfig(filename='/boot/autoconfig.ini'):
 #  [('eth0', 'b8:27:eb:00:00:00'), ('eth1', 'aa:bb:cc:dd:ee:ff')]
 # Sequence:
 #  (1) MAC address starts with B8:27:EB.
+#      Note: B8-27-EB = Raspberry Pi Foundation. 
 #  (2) eth0. 
 #  (3) If none of above matches, first one. 
 def choose_eth(ethslist):
@@ -139,6 +158,73 @@ def choose_eth(ethslist):
     return ethslist[0]
 # end of choose_eth()
 
+# Find the proper block for specific device in /etc/network/interfaces file, 
+#  and change/insert dhcp and static IP settings lines into it. 
+# Parameters:
+#  interflist: a list of each line in /etc/network/interfaces.
+#  devname: device name (eth*, wlan0 etc)
+#  datadict: a dictionary of settings. supported:
+#   'dhcp': DHCP enabled, True or False, REQUIRED
+#   'ip': IP address
+#   'subnet': Subnet mask
+#   'gateway': Default gateway
+def dhcp_and_ip_setting(interflist, devname, datadict):
+    from pprint import pprint
+    import re
+    # Find editing range
+    #  Find "iface <devname> inet (static|dhcp|manual)" line
+    startline = -1
+    patt = 'iface\\s+' + devname + '\\s+inet\\s+(?:dhcp|static|manual)'
+    for i in range(len(interflist)):
+        if re.match(patt, interflist[i]):
+            startline = i;
+            break
+    if (startline == -1): # not found - append to file
+        startline = len(interflist)
+        interflist.append('')
+    #  Find next other device name appeared from startline
+    endline = -1
+    patt = '\\b(?:eth\\d+|wlan\\d+|lo)\\b'
+    pattexcl = '\\b' + devname + '\\b'
+    for i in range(startline + 1, len(interflist)):
+        if re.search(patt, interflist[i]) and not \
+            re.search(pattexcl, interflist[i]):
+            endline = i - 1
+            break
+    if (endline == -1): # not found - edit to eof
+        endline = len(interflist) - 1
+    #  Create a copy of editing range
+    editrange = interflist[startline : endline+1]
+    
+    # DHCP & IP address
+    if 'dhcp' in datadict:
+        if datadict['dhcp'] == True:
+            # 1st line, DHCP Enabled/Disabled
+            editrange[0] = 'iface ' + devname + ' inet dhcp'
+            # Strip all address/netmask/gateway lines
+            pattexcl = '\\b(?:address|netmask|gateway)\\b'
+            pattincl = '^\s*#' # preserve comment lines
+            editrange = [l for l in editrange if not re.search(pattexcl, l) \
+                or re.match(pattincl, l)]
+        else:
+            # 1st line, DHCP Enabled/Disabled
+            editrange[0] = 'iface ' + devname + ' inet static'
+            # Strip all existing address/netmask/gateway lines
+            pattexcl = '\\b(?:address|netmask|gateway)\\b'
+            pattincl = '^\s*#' # preserve comment lines
+            editrange = [l for l in editrange if not re.search(pattexcl, l) \
+                or re.match(pattincl, l)]
+            # Insert new address/netmask/gateway lines
+            if 'ip' in datadict and 'subnet' in datadict and \
+                'gateway' in datadict:
+                editrange.insert(1, ' address ' + str(datadict['ip']))
+                editrange.insert(2, ' netmask ' + str(datadict['subnet']))
+                editrange.insert(3, ' gateway ' + str(datadict['gateway']))
+    # Restore editing range copy into original list
+    interflist[startline : endline+1] = editrange
+    return interflist
+# end of dhcp_and_ip_setting()
+
 ############################################################
 ############# C O N F I G   F U N C T I O N S  #############
 ############################################################
@@ -147,16 +233,16 @@ def setup_screen(configfile):
     SECNAME = 'Screen'
     # Run only if proper section exists in autoconfig.ini
     if not configfile.has_section(SECNAME): return False
+    sys.stdout.write('INFO: Configuring screen... \n')
     
     # Load config.txt
     try:
-        fcnftxt = open('/boot/config.txt', 'r')
-        cnftxt = fcnftxt.read()
-        fcnftxt.close()
+        cnftxt = open('/boot/config.txt', 'r').read()
     except IOError:
         cnftxt = ''
     except:
-        sys.stderr.write('FAILED: Unable to read or create /boot/config.txt! \n')
+        sys.stderr.write('FAILED: Unable to read or create ' + \
+            '/boot/config.txt! \n')
         sys.stderr.write('FAILED: All screen settings unchanged. \n')
         return False
     # Regex lib needed for editing config.txt
@@ -185,8 +271,8 @@ def setup_screen(configfile):
                     patt = '^.*hdmi_group.*$'
                     repl = 'hdmi_group=' + str(hdmigroup)
                     [cnftxt, n] = re.subn(patt, repl, cnftxt, 1, flags=re.M)
-                    # Set hdmi_mode=<var:hdmimode>
                     if n == 0: cnftxt += '\n' + repl
+                    # Set hdmi_mode=<var:hdmimode>
                     patt = '^.*hdmi_mode.*$'
                     repl = 'hdmi_mode=' + str(hdmimode)
                     [cnftxt, n] = re.subn(patt, repl, cnftxt, 1, flags=re.M)
@@ -194,10 +280,11 @@ def setup_screen(configfile):
                     # Set hdmi_ignore_edid=0xa5000080
                     patt = '^.*hdmi_ignore_edid.*$'
                     repl = 'hdmi_ignore_edid=0xa5000080'
-                    [cnftxt, n] = re.subn(patt, repl, cnftxt,, 1 flags=re.M)
+                    [cnftxt, n] = re.subn(patt, repl, cnftxt, 1, flags=re.M)
                     if n == 0: cnftxt += '\n' + repl
                 else: # hdmi_mode value out of range
-                    sys.stderr.write('WARN: HDMI_Mode value specified in [Screen].Output out of range. \n')
+                    sys.stderr.write('WARN: HDMI_Mode value specified in ' + \
+                        '[Screen].Output out of range. \n')
                     sys.stderr.write('FAILED: Resolution unchanged. \n')
                     pass
             else: # Any other invalid value
@@ -219,7 +306,8 @@ def setup_screen(configfile):
             # Set "hdmi_force_hotplug=1", comment out "hdmi_ignore_hotplug"
             patt = '^.*hdmi_force_hotplug.*$'
             repl = 'hdmi_force_hotplug=1'
-            cnftxt = re.sub(patt, repl, cnftxt, 1, flags=re.M)
+            [cnftxt, n] = re.subn(patt, repl, cnftxt, 1, flags=re.M)
+            if n == 0: cnftxt += '\n' + repl
             patt = '^(hdmi_ignore_hotplug)'; repl = '#\g<0>'
             cnftxt = re.sub(patt, repl, cnftxt, flags=re.M)
         elif value.lower() == 'comp':
@@ -228,7 +316,8 @@ def setup_screen(configfile):
             cnftxt = re.sub(patt, repl, cnftxt, flags=re.M)
             patt = '^.*hdmi_ignore_hotplug.*$'
             repl = 'hdmi_ignore_hotplug=1'
-            cnftxt = re.sub(patt, repl, cnftxt, 1, flags=re.M)
+            [cnftxt, n] = re.subn(patt, repl, cnftxt, 1, flags=re.M)
+            if n == 0: cnftxt += '\n' + repl
         else: # Any other invalid value
             sys.stderr.write('WARN: Invalid [Screen].Output value. \n')
             sys.stderr.write('FAILED: Output device unchanged. \n')
@@ -240,6 +329,7 @@ def setup_screen(configfile):
     fcnftxt.write(cnftxt)
     fcnftxt.close()
     
+    sys.stdout.write('INFO: Screen config complete. \n')
     return True
 # end of setup_screen()
 
@@ -247,6 +337,18 @@ def setup_wired(configfile):
     SECNAME = 'Wired'
     # Run only if proper section exists in autoconfig.ini
     if not configfile.has_section(SECNAME): return False
+    sys.stdout.write('INFO: Configuring wired network... \n')
+    
+    # Load /etc/network/interfaces
+    try:
+        interf = open('/etc/network/interfaces', 'r').read().split('\n')
+        #interf = open('interfaces.txt', 'r').read().split('\n') # use temp file in home dir to test
+    except:
+        sys.stderr.write('FAILED: Unable to read /etc/network/interfaces! \n')
+        sys.stderr.write('FAILED: All wired network settings unchanged. \n')
+        return False
+    # Regex lib needed for editing text file
+    import re
     
     # Show all wired ethernet network cards (eth*)
     # Fetch `ip link show` command stdout
@@ -259,12 +361,11 @@ def setup_wired(configfile):
         '\s*link/ether\s+(?P<hwaddr>(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})'
     eths = re.findall(patt, ipoutput, flags=re.M) 
     # eg: [('eth0', 'b8:27:eb:00:00:00'), ('eth1', 'aa:bb:cc:dd:ee:ff')]
-    # Note: MAC Address prefix B8-27-EB = Raspberry Pi Foundation. 
     
     # Count NIC, get device name and MAC address. 
     if len(eths) == 1: 
         # One NIC (most probably Model B integrated one), use it directly.
-        (ethdev, ethmac) = eth[0]
+        (ethdev, ethmac) = eths[0]
     elif len(eths) > 1:
         # Multi NIC
         sys.stderr.write('WARN: ' + str(len(eths)) + \
@@ -278,8 +379,26 @@ def setup_wired(configfile):
         sys.stderr.write('FAILED: All wired network settings unchanged. \n')
         return False
     
+    # [Wired].DHCP, and [Wired].IP/Subnet/Gateway (if DHCP=0)
+    if configfile.has_option(SECNAME, 'DHCP'):
+        value = configfile.get(SECNAME, 'DHCP')
+        if value == '1':
+            interf = dhcp_and_ip_setting(interf, ethdev, {'dhcp': True})
+        elif value == '0':
+            sdict = {'dhcp': False}
+            sdict['ip'] = configfile.get(SECNAME, 'IP')
+            sdict['subnet'] = configfile.get(SECNAME, 'Subnet')
+            sdict['gateway'] = configfile.get(SECNAME, 'Gateway')
+            interf = dhcp_and_ip_setting(interf, ethdev, sdict)
+        else:
+            sys.stderr.write('WARN: Invalid [Wired].DHCP value. \n')
+            sys.stderr.write('FAILED: DHCP for ' + ethdev + ' unchanged. \n')
     
+    # Write back changes to /etc/network/interfaces
+    open('/etc/network/interfaces', 'w').write('\n'.join(interf)) 
+    # open('interfaces.txt', 'w').write('\n'.join(interf)) # use temp file in home dir to test
     
+    sys.stdout.write('INFO: Wired network config complete. \n')
     return True
 # end of setup_wired
 
@@ -305,10 +424,14 @@ def main(argv):
         sys.stderr.write('ERROR: autoconfig.ini file read error. \n')
         return 1
     
+    sys.stdout.write(RPAC_SPLASH_STRING)
+    
     # Config routline
     setup_screen(configfile)
+    setup_wired(configfile)
     
     # Normal Exit
+    sys.stdout.write('All configuration completed. \n')
     return 0
 # end of main()
 
