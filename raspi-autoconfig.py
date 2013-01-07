@@ -224,6 +224,66 @@ def dhcp_and_ip_setting(interflist, devname, datadict):
     return interflist
 # end of dhcp_and_ip_setting()
 
+# Edit locales to be generated, and default locale.
+def localization_locales(locales_togenerate=[], defaultlocale=None):
+    # Load all supported locales of the system first. 
+    try:
+        locales_supported = open('/usr/share/i18n/SUPPORTED', 'r').read() \
+            .split('\n')
+        if '' in locales_supported: locales_supported.remove('')
+    except:
+        sys.stderr.write('FAILED: Unable to get supported locales of ' + \
+            'system! \n')
+        sys.stderr.write('FAILED: All locales settings unchanged. \n')
+        return
+    return
+    
+    # Edit locales, completely rewrite `/etc/locale.gen`
+    #  (list all supported locales, add leading # before ungenerated ones)
+    if locales_togenerate:
+        try:
+            flocalesgen = open("/home/pi/locale.txt", 'w')
+            flocalesgen.write('''\
+# This file lists locales that you wish to have built. You can find a list
+# of valid supported locales at /usr/share/i18n/SUPPORTED, and you can add
+# user defined locales to /usr/local/share/i18n/SUPPORTED. If you change
+# this file, you need to rerun locale-gen.
+#
+
+'''
+            for locale in locales_supported:
+                if not locale in locale_to_generate: 
+                    flocalesgen.write('# ')
+                flocalesgen.write(locale + '\n');
+            flocalesgen.close()
+        except IOError:
+            sys.stderr.write('FAILED: Unable to write /etc/locale.gen! \n')
+            sys.stderr.write('FAILED: Locales unchanged. \n')
+    
+    # Edit default locale, write `/etc/default/locale`
+    if defaultlocale:
+        try:
+            if defaultlocale in locales_supported:
+                fdefaultlocale = open("/home/pi/deflocale.txt", 'w')
+                fdefaultlocale.write('LANG=' + defaultlocale);
+                flocalesgen.close()
+            else:
+                sys.stderr.write('FAILED: ' + defaultlocale + ' is not a ' + \
+                    'a valid locale! \n')
+                sys.stderr.write('FAILED: Default locale unchanged. \n')
+        except IOError:
+            sys.stderr.write('FAILED: Unable to write /etc/default/locale! \n')
+            sys.stderr.write('FAILED: Default locale unchanged. \n')
+    
+    # Run dpkg-reconfigure
+    if locales_togenerate or defaultlocale:
+        import subprocess
+        subprocess.call(['dpkg-reconfigure', '--frontend=noninteractive', 
+            'locales'])
+    
+    return
+# end of localization_locales()
+
 ############################################################
 ############# C O N F I G   F U N C T I O N S  #############
 ############################################################
@@ -526,6 +586,39 @@ def setup_wireless(configfile):
     return False
 # end of setup_wireless
 
+def setup_localization(configfile):
+    SECNAME = 'Localization'
+    # Run only if proper section exists in autoconfig.ini
+    if not configfile.has_section(SECNAME): return False
+    sys.stdout.write('INFO: Configuring localization settings... \n')
+    
+    # Regex lib needed for editing text file
+    import re
+    
+    # Edit locales and default locale
+    if configfile.has_option(SECNAME, 'Locales') or \
+        configfile.has_option(SECNAME, 'DefaultLocale'):
+        if configfile.has_option(SECNAME, 'Locales'):
+            localeslist = configfile.get(SECNAME, 'Locales').split(',')
+            localeslist = list(map(lambda s: s.strip(), localeslist))
+        else:
+            localeslist = []
+        if configfile.has_option(SECNAME, 'DefaultLocale'):
+            defaultlocale = configfile.get(SECNAME, 'DefaultLocale')
+        else:
+            defaultlocale = ''
+        localization_locales(localeslist, defaultlocale)
+    
+    # Edit keyboard model and layout 
+    pass
+    
+    # Edit timezone
+    pass
+    
+    sys.stdout.write('INFO: Localization config complete. \n')
+    return True
+# end of setup_localization
+
 ############################################################
 ################ M A I N   R O U T L I N E  ################
 ############################################################
@@ -555,6 +648,7 @@ def main(argv):
     reboot = reboot or setup_screen(configfile)
     reboot = reboot or setup_wired(configfile)
     reboot = reboot or setup_wireless(configfile)
+    reboot = reboot or setup_localization(configfile)
     
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
