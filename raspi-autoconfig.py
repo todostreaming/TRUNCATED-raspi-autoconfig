@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-# raspi-autoconfig 1.0
+# raspi-autoconfig 1.0 (pre-publish draft)
 #
 # Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) 
 # ARM computer. 
@@ -236,7 +236,6 @@ def localization_locales(locales_togenerate=[], defaultlocale=None):
             'system! \n')
         sys.stderr.write('FAILED: All locales settings unchanged. \n')
         return
-    return
     
     # Edit locales, completely rewrite `/etc/locale.gen`
     #  (list all supported locales, add leading # before ungenerated ones)
@@ -250,7 +249,7 @@ def localization_locales(locales_togenerate=[], defaultlocale=None):
 # this file, you need to rerun locale-gen.
 #
 
-'''
+''')
             for locale in locales_supported:
                 if not locale in locale_to_generate: 
                     flocalesgen.write('# ')
@@ -283,6 +282,126 @@ def localization_locales(locales_togenerate=[], defaultlocale=None):
     
     return
 # end of localization_locales()
+
+# Edit keyboard model and/or layout. 
+def localization_keyboard(model=None, layout=None):
+    # Load /etc/default/keyboard
+    try:
+        kbconffile = open('/etc/default/keyboard', 'r').read()
+    except:
+        sys.stderr.write('FAILED: Unable to read keyboard configuration ' + \
+            'file /etc/default/keyboard! \n')
+        sys.stderr.write('FAILED: All keyboard settings unchanged. \n')
+        return
+    
+    # Regex for editing text
+    import re
+    
+    # Keyboard model
+    if model:
+        patt = '^XKBMODEL\\s*=\\s*"(?P<modelname>.+)"'
+        repl = 'XKBMODEL=\"' + re.escape(model) + '\"'
+        [kbconffile, n] = re.subn(patt, repl, kbconffile, 1, flags=re.M)
+        if n == 0: kbconffile += '\n' + repl
+    
+    # Keyboard layout
+    if layout:
+        patt = '^XKBLAYOUT\\s*=\\s*"(?P<layoutname>.+)"'
+        repl = 'XKBLAYOUT=\"' + re.escape(layout) + '\"'
+        [kbconffile, n] = re.subn(patt, repl, kbconffile, 1, flags=re.M)
+        if n == 0: kbconffile += '\n' + repl
+    
+    # Write back to /etc/default/keyboard
+    try:
+        open('/etc/default/keyboard', 'w').write(kbconffile)
+    except:
+        sys.stderr.write('FAILED: Unable to write keyboard configuration ' + \
+            'file /etc/default/keyboard! \n')
+        sys.stderr.write('FAILED: All keyboard settings unchanged. \n')
+        return
+    
+    # Run dpkg-reconfigure and invoke-rc.d
+    import subprocess
+    subprocess.call(['dpkg-reconfigure', '--frontend=noninteractive', 
+        'keyboard-configuration'])
+    subprocess.call(['invoke-rc.d', 'keyboard-setup', 'start'])
+    
+    return
+# end of localization_keyboard()
+
+# Edit timezone. 
+def localization_timezone(timezone):
+    if not timezone: return
+    
+    # Write timezone to /etc/timezone
+    try:
+        open('/etc/timezone', 'w').write(timezone)
+    except:
+        sys.stderr.write('FAILED: Unable to write timezone configuration ' + \
+            'file /etc/timezone! \n')
+        sys.stderr.write('FAILED: Timezone unchanged. \n')
+        return
+    
+    # Run dpkg-reconfigure
+    import subprocess
+    subprocess.call(['dpkg-reconfigure', '--frontend=noninteractive', 
+        'tzdata'])
+    
+    return
+# end of localization_timezone()
+
+# Edit APT mirror. 
+def apt_mirror(mirrorurl):
+    # URL Verification (1.in right format; 2.reachable)
+    import re, urllib.request, socket
+    mirrorurl = mirrorurl.strip()
+    patt = '^(https|http|ftp)://[0-9a-zA-Z$\\\\-_.+!*\\\'(),/%]+$'
+    if not re.match(patt, mirrorurl, re.M):
+        sys.stderr.write('FAILED: ' + mirrorurl + ' is not a valid HTTP/' + \
+            'HTTPS/FTP URL! \n')
+        sys.stderr.write('FAILED: APT mirror unchanged. \n')
+        return
+    print("Connecting to "  + mirrorurl + "...")
+    try:
+        resp = urllib.request.urlopen(mirrorurl, timeout=15)
+    except (urllib.error.URLError, socket.error) as err:
+        sys.stderr.write('FAILED: Unable to reach ' + mirrorurl + ' ! \n')
+        sys.stderr.write('(Check your network connection and mirror URL). \n')
+        sys.stderr.write('FAILED: APT mirror unchanged. \n')
+        return
+    
+    # Read /etc/apt/sources.list
+    try:
+        aptlist = open('/etc/apt/sources.list', 'r').read().split('\n')
+        aptlist = list(map(lambda s: s.strip(), aptlist))
+    except:
+        sys.stderr.write('FAILED: Unable to read APT source list file ' + \
+            '/etc/apt/sources.list! \n')
+        sys.stderr.write('FAILED: APT mirror unchanged. \n')
+        return
+    
+    # Comment out every uncommented line
+    for i, aptline in enumerate(aptlist):
+        if aptline and aptline[0] != '#':
+            aptlist[i] = '# ' + aptline
+    
+    aptlist.append('deb ' + mirrorurl + ' wheezy main contrib non-free rpi')
+    
+    # Write back to /etc/apt/sources.list
+    try:
+        open('/etc/apt/sources.list', 'w').write('\n'.join(aptlist))
+    except:
+        sys.stderr.write('FAILED: Unable to write APT source list file ' + \
+            '/etc/apt/sources.list! \n')
+        sys.stderr.write('FAILED: APT mirror unchanged. \n')
+        return
+    
+    # Run apt-get update
+    import subprocess
+    subprocess.call(['apt-get', 'update'])
+    
+    return
+# end of localization_timezone()
 
 ############################################################
 ############# C O N F I G   F U N C T I O N S  #############
@@ -462,8 +581,8 @@ def setup_wired(configfile):
     subprocess.call(['ifup', ethdev])
     
     sys.stdout.write('INFO: Wired network config complete. \n')
-    return True
-# end of setup_wired
+    return False
+# end of setup_wired()
 
 def setup_wireless(configfile):
     SECNAME = 'Wireless'
@@ -584,7 +703,7 @@ def setup_wireless(configfile):
     
     sys.stdout.write('INFO: Wireless network config complete. \n')
     return False
-# end of setup_wireless
+# end of setup_wireless()
 
 def setup_localization(configfile):
     SECNAME = 'Localization'
@@ -610,14 +729,33 @@ def setup_localization(configfile):
         localization_locales(localeslist, defaultlocale)
     
     # Edit keyboard model and layout 
-    pass
+    if configfile.has_option(SECNAME, 'KeyboardModel') or \
+        configfile.has_option(SECNAME, 'KeyboardLayout'):
+        model = configfile.get(SECNAME, 'KeyboardModel', fallback=None)
+        layout = configfile.get(SECNAME, 'KeyboardLayout', fallback=None)
+        localization_keyboard(model, layout)
     
     # Edit timezone
-    pass
+    if configfile.has_option(SECNAME, 'TimeZone'):
+        localization_timezone(configfile.get(SECNAME, 'TimeZone'))
     
     sys.stdout.write('INFO: Localization config complete. \n')
-    return True
-# end of setup_localization
+    return False
+# end of setup_localization()
+
+def setup_apt(configfile):
+    SECNAME = 'APT'
+    # Run only if proper section exists in autoconfig.ini
+    if not configfile.has_section(SECNAME): return False
+    sys.stdout.write('INFO: Configuring APT settings... \n')
+    
+    # Edit APT mirror
+    if configfile.has_option(SECNAME, 'Mirror'):
+        apt_mirror(configfile.get(SECNAME, 'Mirror'))
+    
+    sys.stdout.write('INFO: APT config complete. \n')
+    return False
+# end of setup_apt()
 
 ############################################################
 ################ M A I N   R O U T L I N E  ################
@@ -649,6 +787,7 @@ def main(argv):
     reboot = reboot or setup_wired(configfile)
     reboot = reboot or setup_wireless(configfile)
     reboot = reboot or setup_localization(configfile)
+    reboot = reboot or setup_apt(configfile)
     
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
