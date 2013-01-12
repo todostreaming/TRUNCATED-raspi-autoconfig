@@ -401,7 +401,83 @@ def apt_mirror(mirrorurl):
     subprocess.call(['apt-get', 'update'])
     
     return
-# end of localization_timezone()
+# end of apt_mirror()
+
+# Install vnc server autorun script. 
+def remote_vnc_autorun_install(resolutionwidth=800, resolutionheight=600):
+    # exception handling pending for this function!!!
+    
+    SCRIPTCONTENT = '''\
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          tightvncserver
+# Required-Start:    $local_fs
+# Required-Stop:     $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start/stop tightvncserver
+### END INIT INFO
+
+# More details see:
+# http://www.penguintutor.com/linux/tightvnc
+
+### Customize this entry
+# Set the USER variable to the name of the user to start tightvncserver under
+export USER='pi'
+### End customization required
+
+eval cd ~$USER
+
+case "$1" in
+  start)
+    su $USER -c '/usr/bin/tightvncserver -geometry ''' + \
+str(resolutionwidth) + 'x' + str(resolutionheight) + \
+''' :1'
+    echo "Starting TightVNC server for $USER "
+    ;;
+  stop)
+    su $USER -c '/usr/bin/tightvncserver -kill :1'
+    echo "Tightvncserver stopped"
+    ;;
+  *)
+    echo "Usage: /etc/init.d/tightvncserver {start|stop}"
+    exit 1
+    ;;
+esac
+exit 0
+'''
+    SCRIPTPATH = '/etc/init.d/'
+    SCRIPTFILENAME = 'tightvncserver'
+    import os
+    SCRIPTFULLPATH = os.path.join(SCRIPTPATH, SCRIPTFILENAME)
+    
+    # Write script file in /etc/init.d/
+    open(SCRIPTFULLPATH, 'w').write(SCRIPTCONTENT)
+    # Chmod +x
+    import os, stat
+    filestat = os.stat(SCRIPTFULLPATH)
+    os.chmod(SCRIPTFULLPATH, filestat.st_mode | stat.S_IEXEC)
+    # Run update-rc.d
+    import subprocess
+    subprocess.call(['update-rc.d', SCRIPTFILENAME, 'defaults'])
+    
+    return
+# end of remote_vnc_autorun_install()
+
+# Uninstall vnc server autorun script. 
+def remote_vnc_autorun_uninst():
+    search_path = '/etc/init.d/'
+    # Find all scripts including 'vncserver' and delete them
+    import os
+    filelist = os.listdir(search_path)
+    for filename in filelist:
+        full_path = os.path.join(search_path, filename)
+        if not os.path.isfile(full_path):
+            continue;
+        filecontent = open(full_path, 'r').read()
+        if 'vncserver' in filecontent:
+            os.remove(full_path)
+# end of remote_vnc_autorun_uninst()
 
 ############################################################
 ############# C O N F I G   F U N C T I O N S  #############
@@ -757,6 +833,93 @@ def setup_apt(configfile):
     return False
 # end of setup_apt()
 
+def setup_remote(configfile):
+    SECNAME = 'Remote'
+    # Run only if proper section exists in autoconfig.ini
+    if not configfile.has_section(SECNAME): return False
+    sys.stdout.write('INFO: Configuring remote access settings... \n')
+    
+    # Required during ssh and vnc setup
+    import subprocess
+    
+    # SSH
+    if configfile.has_option(SECNAME, 'SSH'):
+        sys.stdout.write('Setting up SSH... \n')
+        SSHonoff = configfile.get(SECNAME, 'SSH').strip()
+        if SSHonoff == '1':
+            subprocess.call(['update-rc.d', 'ssh', 'enable'])
+            subprocess.call(['invoke-rc.d', 'ssh', 'start'])
+        elif SSHonoff == '0':
+            subprocess.call(['update-rc.d', 'ssh', 'disable'])
+        else:
+            sys.stderr.write('WARN: Only 1 or 0 for option [Remote].SSH ' + \
+                'please. \n')
+            sys.stderr.write('WARN: SSH settings unchanged. \n')
+    
+    # VNC
+    if configfile.has_option(SECNAME, 'VNC'):
+        sys.stdout.write('Setting up VNC... \n')
+        VNConoff = configfile.get(SECNAME, 'VNC').strip()
+        if VNConoff == '1':
+            # [Remote].VNCPassword required on installing VNC
+            if configfile.has_option(SECNAME, 'VNCPassword'):
+                # Install tightvncserver via APT
+                aptret = subprocess.call(['apt-get', '-y', 'install', 
+                    'tightvncserver'])
+                if aptret == 0:
+                    # Set VNC Password via vncpasswd command
+                    vncpasswd_unencry = configfile.get(SECNAME, 'VNCPassword')
+                    vncpasswd_proc = subprocess.Popen(['vncpasswd', '-f'], 
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+                    vncpasswd_encry = vncpasswd_proc.communicate(bytes(
+                        vncpasswd_unencry, 'ascii'))[0]
+                    vncpasswd_proc = None
+                    import os.path
+                    vncpasswd_filepath = os.path.join(os.path.expanduser(
+                        '~pi'), '.vnc/passwd')
+                    open(vncpasswd_filepath, 'wb').write(vncpasswd_encry)
+                    # Read VNC Resolution
+                    vnc_resolution = [None, None]
+                    if configfile.has_option(SECNAME, 'VNCResolution'):
+                        import re
+                        vnc_resolution_raw = configfile.get(SECNAME, 
+                            'VNCResolution')
+                        patt = '^\\s*(?P<width>\\d+)\\s*' + \
+                            'x\\s*(?P<height>\\d+)\\s*$'
+                        m = re.match(patt, vnc_resolution_raw)
+                        if m:
+                            vnc_resolution = [int(m.group('width')), 
+                                int(m.group('height'))]
+                        else:
+                            sys.stderr.write('WARN: [Remote].VNCResolution' + \
+                                'value is in wrong format. \n' + \
+                                '(Default resolution is used instead.) \n')
+                    # Setup VNC autorun
+                    remote_vnc_autorun_install(vnc_resolution[0], 
+                        vnc_resolution[1])
+                    # Start up VNC server
+                    subprocess.call(['/etc/init.d/tightvncserver', 'start'])
+                else:
+                    sys.stderr.write('ERROR: Error occured on installing ' + \
+                        'tightvncserver via apt-get!. \n')
+                    sys.stderr.write('FAILED: VNC server is not installed. \n')
+            else:
+                sys.stderr.write('ERROR: A VNC password is required to ' + \
+                    'install VNC server! \n' + \
+                    '(Please specify a [Remote].VNCPassword value.) \n')
+                sys.stderr.write('FAILED: VNC server is not installed. \n')
+        elif VNConoff == '0':
+            subprocess.call(['apt-get', '-y', 'remove', 'tightvncserver'])
+            remote_vnc_autorun_uninst()
+        else:
+            sys.stderr.write('WARN: Only 1 or 0 for option [Remote].VNC ' + \
+                'please. \n')
+            sys.stderr.write('WARN: VNC server is not changed. \n')
+    
+    sys.stdout.write('INFO: Remote access config complete. \n')
+    return False
+# end of setup_remote()
+
 ############################################################
 ################ M A I N   R O U T L I N E  ################
 ############################################################
@@ -788,6 +951,7 @@ def main(argv):
     reboot = reboot or setup_wireless(configfile)
     reboot = reboot or setup_localization(configfile)
     reboot = reboot or setup_apt(configfile)
+    reboot = reboot or setup_remote(configfile)
     
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
