@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-# raspi-autoconfig 1.0 
+# raspi-autoconfig 1.0.1
 #
 # Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) 
 # ARM computer. 
@@ -483,6 +483,42 @@ def remote_vnc_autorun_uninst():
 ############# C O N F I G   F U N C T I O N S  #############
 ############################################################
 
+def setup_system(configfile):
+    SECNAME = 'System'
+    # Run only if proper section exists in autoconfig.ini
+    if not configfile.has_section(SECNAME): return False
+    sys.stdout.write('INFO: Configuring system... \n')
+    
+    reboot = False
+    if configfile.has_option(SECNAME, 'ExpandRootfs'):
+        Expandrootfs = configfile.get(SECNAME, 'ExpandRootfs').strip()
+        if Expandrootfs == '1':
+            import subprocess
+            # Get start sector of /dev/mmcblk0p2
+            sys.stdout.write('Expand root filesystem to fill the SD card' + \
+                '... \n')
+            ptable = subprocess.check_output(['fdisk', '-l', '/dev/mmcblk0'], 
+                universal_newlines=True)
+            precord = (ptable.split('\n')[-2]).split()
+            pstartsector = precord[1]
+            # Launch fdisk
+            fdisk_stdin = bytes('p\nd\n2\nn\np\n2\n' + pstartsector + \
+                '\n\np\nw\n', 'ascii')
+            fdisk_proc = subprocess.Popen(['fdisk', '/dev/mmcblk0'], 
+                stdin=subprocess.PIPE)
+            fdisk_proc.communicate(fdisk_stdin)
+            reboot = True
+        elif Expandrootfs == '0':
+            pass
+        else:
+            sys.stderr.write('WARN: Only 1 for option [System].' + \
+                'Expandrootfs please. \n')
+            sys.stderr.write('WARN: Root filesystem not expanded. \n')
+    
+    sys.stdout.write('INFO: System config complete. \n')
+    return reboot
+# end of setup_system()
+
 def setup_screen(configfile):
     SECNAME = 'Screen'
     # Run only if proper section exists in autoconfig.ini
@@ -933,7 +969,7 @@ def setup_simpchinese(configfile):
     # Wenquanyi Font
     if configfile.has_option(SECNAME, 'WQYFont'):
         sys.stdout.write('Installing Wenquanyi Chinese font... \n')
-        WQYinst = configfile.get(SECNAME, 'WQYFont')
+        WQYinst = configfile.get(SECNAME, 'WQYFont').strip()
         if WQYinst == '1':
             subprocess.call(['apt-get', '-y', 'install', 'ttf-wqy-zenhei'])
         else:
@@ -944,8 +980,8 @@ def setup_simpchinese(configfile):
     # SCIM Pinyin/Wubi
     if configfile.has_option(SECNAME, 'SCIMPinyin') or \
         configfile.has_option(SECNAME, 'SCIMWubi'):
-        SCIMPinyin_inst = configfile.get(SECNAME, 'SCIMPinyin')
-        SCIMWubi_inst = configfile.get(SECNAME, 'SCIMWubi')
+        SCIMPinyin_inst = configfile.get(SECNAME, 'SCIMPinyin').strip()
+        SCIMWubi_inst = configfile.get(SECNAME, 'SCIMWubi').strip()
         sys.stdout.write('Installing SCIM Chinese input method... \n')
         if SCIMPinyin_inst == '1':
             subprocess.call(['apt-get', '-y', 'install', 'scim', 
@@ -993,6 +1029,7 @@ def main(argv):
     
     # Config routline
     reboot = False
+    reboot = reboot or setup_system(configfile)
     reboot = reboot or setup_screen(configfile)
     reboot = reboot or setup_wired(configfile)
     reboot = reboot or setup_wireless(configfile)
@@ -1003,6 +1040,17 @@ def main(argv):
     
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
+    
+    # Reboot
+    if reboot:
+        sys.stdout.write('NOTICE: Reboot is needed for some configuration ' + \
+            'steps!!! \n')
+        sys.stdout.write('SYSTEM IS GOING TO REBOOT IN 5 SECONDS. \n')
+        import subprocess
+        subprocess.call(['sleep', '5'])
+        subprocess.call(['reboot'])
+        return 0
+    
     return 0
 # end of main()
 
