@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-# raspi-autoconfig 1.0.1
+# raspi-autoconfig 1.0.2
 #
 # Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) 
 # ARM computer. 
@@ -40,49 +40,9 @@ RPAC_SPLASH_STRING = '''\
    
 '''
 
-# Regex validation rules for configuration file
-RPAC_CONFIG_REGEX = {
-    'Screen': {
-        'Resolution': '^((1,\\s+\\d+)|(2,\\s+\\d+))$', # unsafe match
-        'Output': '^(Auto|HDMI|Comp)$'
-    }, 
-    'Wired': {
-        'DHCP': '^(1|0)$',
-        'IP': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', # unsafe match
-        'Subnet': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', # unsafe match
-        'Gateway': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$' # unsafe match
-    }, 
-    'Wireless': {
-        'SSID': '',
-        'Passphrase': '',
-        'DHCP': '^(1|0)$',
-        'IP': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', # unsafe match
-        'Subnet': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', # unsafe match
-        'Gateway': '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$' # unsafe match
-    }, 
-    'Locale': {
-        'Locale': '', # unsafe match
-        'DefaultLocale': '', # unsafe match
-        'KeyboardModel': '', # unsafe match
-        'KeyboardLayout': '', # unsafe match
-        'Timezone': '' # unsafe match
-    },
-    'APT': {
-        # RFC1738. rough match
-        'Mirror': '^(https|http|ftp)://[0-9a-zA-Z$\\-_.+!*\'(),/%]+$' 
-    }, 
-    'Remote': {
-        'SSH': '^(1|0)$',
-        'VNC': '^(1|0)$',
-        'VNCPassword': '',
-        'VNCResolution': '^((\\d+)x(\\d+))$'
-    }, 
-    'SimpChinese': {
-        'WQYFont': '^(1|0)$',
-        'SCIMPinyin': '^(1|0)$',
-        'SCIMWubi': '^(1|0)$'
-    }
-}
+# Available sections
+RPAC_SECTIONS = ['System', 'Screen', 'Wired', 'Wireless', 'Localization', 
+    'APT', 'Remote', 'SimpChinese']
 
 ############################################################
 ########## A U X I L I A R Y   F U N C T I O N S  ##########
@@ -126,7 +86,7 @@ def envreq():
 # end of envreq()
 
 # Config file load
-def loadconfig(filename='/boot/autoconfig.ini'):
+def loadconfig(filename):
     import configparser;
     configfile = configparser.ConfigParser()
     readret = configfile.read(filename)
@@ -514,6 +474,28 @@ def setup_system(configfile):
             sys.stderr.write('WARN: Only 1 for option [System].' + \
                 'Expandrootfs please. \n')
             sys.stderr.write('WARN: Root filesystem not expanded. \n')
+    
+    if configfile.has_option(SECNAME, 'BootBehavior'):
+        BootBehavior = configfile.get(SECNAME, 'BootBehavior').strip().lower()
+        import subprocess
+        if BootBehavior == 'commandlinelogin':
+            subprocess.call(['update-rc.d', 'lightdm', 'disable', '2'])
+            reboot = True
+        elif BootBehavior == 'desktopauto':
+            subprocess.call(['update-rc.d', 'lightdm', 'enable', '2'])
+            # Edit /etc/lightdm/lightdm.conf
+            import re
+            cnftxt = open('/etc/lightdm/lightdm.conf', 'r').read()
+            patt = '^(?P<confline>\s*#\s*autologin-user=.*)$'
+            repl = 'autologin-user=pi'
+            [cnftxt, n] = re.subn(patt, repl, cnftxt, 1, flags=re.M)
+            if n == 0: cnftxt += '\n' + repl
+            open('/etc/lightdm/lightdm.conf', 'w').write(cnftxt)
+            reboot = True
+        else:
+            sys.stderr.write('WARN: Invalid value for [System].' + \
+                'BootBehavior. \n')
+            sys.stderr.write('WARN: Boot behavior unchanged. \n')
     
     sys.stdout.write('INFO: System config complete. \n')
     return reboot
@@ -1017,14 +999,28 @@ def main(argv):
     # `/boot/autoconfig.ini` for default,
     # but can also be customized via command line.
     if (len(sys.argv) < 2):
-        configfile = loadconfig()
+        configfilepath = '/boot/autoconfig.ini'
     else:
-        configfile = loadconfig(sys.argv[1])
+        configfilepath = sys.argv[1]
+    configfile = loadconfig(configfilepath)
+    configfiletext = open(configfilepath, 'r').read()
     
     if not configfile:
         sys.stderr.write('ERROR: autoconfig.ini file read error. \n')
         return 1
     
+    # Exit if config file empty
+    configfileempty = True
+    for sectionname in RPAC_SECTIONS:
+        if configfile.has_section(sectionname):
+            configfileempty = False
+            break
+    if configfileempty:
+        sys.stderr.write('Notice: raspi-autoconfig is not run, because ' + \
+            'autoconfig.ini file is empty. \n')
+        return 0
+    
+    # Else, start program
     sys.stdout.write(RPAC_SPLASH_STRING)
     
     # Config routline
@@ -1040,6 +1036,14 @@ def main(argv):
     
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
+    
+    # Truncate autoconfig.ini file (comment out every valid line)
+    import re
+    patt = '^[^#;\\s]*[a-zA-Z0-9_\\[\\]\\=].*$'
+    repl = '#\\g<0>'
+    configfiletext = re.sub(patt, repl, configfiletext, flags=re.M)
+    #  DOS/Windows newline for Windows compatibility
+    open(configfilepath, 'w', newline='\r\n').write(configfiletext)
     
     # Reboot
     if reboot:
