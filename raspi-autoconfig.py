@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-# raspi-autoconfig 1.0 (pre-publish draft)
+# raspi-autoconfig 1.0 
 #
 # Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) 
 # ARM computer. 
@@ -920,6 +920,53 @@ def setup_remote(configfile):
     return False
 # end of setup_remote()
 
+def setup_simpchinese(configfile):
+    SECNAME = 'SimpChinese'
+    # Run only if proper section exists in autoconfig.ini
+    if not configfile.has_section(SECNAME): return False
+    sys.stdout.write('INFO: Configuring Simplified Chinese localization ' + \
+        ' settings... \n')
+    
+    # Required for using apt-get
+    import subprocess
+    
+    # Wenquanyi Font
+    if configfile.has_option(SECNAME, 'WQYFont'):
+        sys.stdout.write('Installing Wenquanyi Chinese font... \n')
+        WQYinst = configfile.get(SECNAME, 'WQYFont')
+        if WQYinst == '1':
+            subprocess.call(['apt-get', '-y', 'install', 'ttf-wqy-zenhei'])
+        else:
+            sys.stderr.write('WARN: Only 1 for option [SimpChinese].' + \
+                'WQYFont please. \n')
+            sys.stderr.write('WARN: Wenquanyi Chinese font not installed. \n')
+    
+    # SCIM Pinyin/Wubi
+    if configfile.has_option(SECNAME, 'SCIMPinyin') or \
+        configfile.has_option(SECNAME, 'SCIMWubi'):
+        SCIMPinyin_inst = configfile.get(SECNAME, 'SCIMPinyin')
+        SCIMWubi_inst = configfile.get(SECNAME, 'SCIMWubi')
+        sys.stdout.write('Installing SCIM Chinese input method... \n')
+        if SCIMPinyin_inst == '1':
+            subprocess.call(['apt-get', '-y', 'install', 'scim', 
+                'scim-pinyin'])
+        else:
+            sys.stderr.write('WARN: Only 1 for option [SimpChinese].' + \
+                'SCIMPinyin please. \n')
+            sys.stderr.write('WARN: SCIM(Pinyin) not installed. \n')
+        if SCIMWubi_inst == '1':
+            subprocess.call(['apt-get', '-y', 'install', 'scim', 
+                'scim-tables-zh'])
+        else:
+            sys.stderr.write('WARN: Only 1 for option [SimpChinese].' + \
+                'SCIMWubi please. \n')
+            sys.stderr.write('WARN: SCIM(Wubi) not installed. \n')
+    
+    sys.stdout.write('INFO: Simplified Chinese localization config ' + \
+        'complete. \n')
+    return False
+# end of setup_simpchinese()
+
 ############################################################
 ################ M A I N   R O U T L I N E  ################
 ############################################################
@@ -952,6 +999,7 @@ def main(argv):
     reboot = reboot or setup_localization(configfile)
     reboot = reboot or setup_apt(configfile)
     reboot = reboot or setup_remote(configfile)
+    reboot = reboot or setup_simpchinese(configfile)
     
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
