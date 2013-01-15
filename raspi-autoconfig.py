@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-# raspi-autoconfig 1.0.3
+# raspi-autoconfig 1.0.4
 #
 # Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) 
 # ARM computer. 
@@ -1056,6 +1056,13 @@ def main(argv):
     # Restore raspi-config customized /etc/inittab to normal
     # (Enable RPICFG_TO_ENABLE line, disable RPICFG_TO_DISABLE line)
     restore_inittab()
+    
+    # Remove initial boot execution script in /etc/profile.d
+    import os
+    try:
+        os.remove('/etc/profile.d/raspi-autoconfig-1stboot.sh')
+    except:
+        pass
     
     # Reboot
     if reboot:
