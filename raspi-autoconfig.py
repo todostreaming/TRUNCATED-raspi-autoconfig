@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-# raspi-autoconfig 1.0.4
+# raspi-autoconfig 1.0.6
 #
 # Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) 
 # ARM computer. 
@@ -50,9 +50,9 @@ RPAC_SECTIONS = ['System', 'Screen', 'Wired', 'Wireless', 'Localization',
 
 # System requirements check
 def envreq():
-    # Python 3.1 required
-    if sys.hexversion < 0x03010000:
-        sys.stderr.write('Python 3.1 or later version required. ' + 
+    # Python 3.2 required
+    if sys.hexversion < 0x03020000:
+        sys.stderr.write('Python 3.2 or later version required. ' + 
             '(Current version: ' + platform.python_version() + ') \n')
         return False
     
@@ -89,7 +89,7 @@ def envreq():
 def loadconfig(filename):
     import configparser;
     configfile = configparser.ConfigParser()
-    readret = configfile.read(filename)
+    readret = configfile.read(filename, encoding='UTF-8')
     if len(readret) == 0:
         sys.stderr.write('Unable to load configuration file \"' + filename + \
             '\". \n')
@@ -201,7 +201,7 @@ def localization_locales(locales_togenerate=[], defaultlocale=None):
     #  (list all supported locales, add leading # before ungenerated ones)
     if locales_togenerate:
         try:
-            flocalesgen = open("/home/pi/locale.txt", 'w')
+            flocalesgen = open("/etc/locale.gen", 'w')
             flocalesgen.write('''\
 # This file lists locales that you wish to have built. You can find a list
 # of valid supported locales at /usr/share/i18n/SUPPORTED, and you can add
@@ -211,7 +211,7 @@ def localization_locales(locales_togenerate=[], defaultlocale=None):
 
 ''')
             for locale in locales_supported:
-                if not locale in locale_to_generate: 
+                if not locale in locales_togenerate: 
                     flocalesgen.write('# ')
                 flocalesgen.write(locale + '\n');
             flocalesgen.close()
@@ -223,7 +223,7 @@ def localization_locales(locales_togenerate=[], defaultlocale=None):
     if defaultlocale:
         try:
             if defaultlocale in locales_supported:
-                fdefaultlocale = open("/home/pi/deflocale.txt", 'w')
+                fdefaultlocale = open("/etc/default/locale", 'w')
                 fdefaultlocale.write('LANG=' + defaultlocale);
                 flocalesgen.close()
             else:
@@ -482,6 +482,40 @@ def setup_system(configfile):
             fdisk_proc = subprocess.Popen(['fdisk', '/dev/mmcblk0'], 
                 stdin=subprocess.PIPE)
             fdisk_proc.communicate(fdisk_stdin)
+            # set up an init.d script
+            SCRIPTCONTENT = '''\
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides: resize2fs_once
+# Required-Start:
+# Required-Stop:
+# Default-Start: 2 3 4 5 S
+# Default-Stop:
+# Short-Description: Resize the root filesystem to fill partition
+# Description:
+### END INIT INFO
+
+. /lib/lsb/init-functions
+
+case "$1" in
+start)
+log_daemon_msg "Starting resize2fs_once" &&
+resize2fs /dev/mmcblk0p2 &&
+rm /etc/init.d/resize2fs_once &&
+update-rc.d resize2fs_once remove &&
+log_end_msg $?
+;;
+*)
+echo "Usage: $0 start" >&2
+exit 3
+;;
+esac
+'''
+            SCRIPTPATH = '/etc/init.d/resize2fs_once'
+            open(SCRIPTPATH, 'w').write(SCRIPTCONTENT)
+            subprocess.call(['chmod', '+x', '/etc/init.d/resize2fs_once'])
+            subprocess.call(['update-rc.d', 'resize2fs_once', 'defaults'])
+            # Reboot needed
             reboot = True
         elif Expandrootfs == '0':
             pass
@@ -888,6 +922,28 @@ def setup_remote(configfile):
             sys.stderr.write('WARN: Only 1 or 0 for option [Remote].SSH ' + \
                 'please. \n')
             sys.stderr.write('WARN: SSH settings unchanged. \n')
+        
+        if configfile.has_option(SECNAME, 'SSHKeyRegenerate'):
+            SSHkeyregen = configfile.get(SECNAME, 'SSHKeyRegenerate').strip()
+            if SSHkeyregen == '1':
+                sys.stdout.write('Generating SSH fingerprint... \n')
+                import os
+                try:
+                    os.remove('/etc/ssh/ssh_host_dsa_key')
+                    os.remove('/etc/ssh/ssh_host_dsa_key.pub')
+                    os.remove('/etc/ssh/ssh_host_ecdsa_key')
+                    os.remove('/etc/ssh/ssh_host_ecdsa_key.pub')
+                    os.remove('/etc/ssh/ssh_host_rsa_key')
+                    os.remove('/etc/ssh/ssh_host_rsa_key.pub')
+                except:
+                    pass
+                subprocess.call(['ssh-keygen', '-t', 'dsa', '-f', '/etc/ssh/ssh_host_dsa_key', '-N', '']) 
+                subprocess.call(['ssh-keygen', '-t', 'ecdsa', '-f', '/etc/ssh/ssh_host_ecdsa_key', '-N', '']) 
+                subprocess.call(['ssh-keygen', '-t', 'rsa', '-f', '/etc/ssh/ssh_host_rsa_key', '-N', '']) 
+            elif SSHkeyregen == '0':
+                pass
+            else:
+                pass
     
     # VNC
     if configfile.has_option(SECNAME, 'VNC'):
@@ -907,10 +963,21 @@ def setup_remote(configfile):
                     vncpasswd_encry = vncpasswd_proc.communicate(bytes(
                         vncpasswd_unencry, 'ascii'))[0]
                     vncpasswd_proc = None
-                    import os.path
+                    import os, os.path
+                    try:
+                        os.mkdir(os.path.join(os.path.expanduser('~pi'), 
+                            '.vnc'))
+                        subprocess.call(['chown', 'pi:pi', os.path.join(
+                            os.path.expanduser('~pi'), '.vnc')])
+                        subprocess.call(['chmod', '644', os.path.join(
+                            os.path.expanduser('~pi'), '.vnc')])
+                    except:
+                        pass
                     vncpasswd_filepath = os.path.join(os.path.expanduser(
                         '~pi'), '.vnc/passwd')
                     open(vncpasswd_filepath, 'wb').write(vncpasswd_encry)
+                    subprocess.call(['chown', 'pi:pi', vncpasswd_filepath])
+                    subprocess.call(['chmod', '600', vncpasswd_filepath])
                     # Read VNC Resolution
                     vnc_resolution = [None, None]
                     if configfile.has_option(SECNAME, 'VNCResolution'):
@@ -1023,7 +1090,7 @@ def main(argv):
             'unable to be read. \n')
         return 2
     else:
-        configfiletext = open(configfilepath, 'r').read()
+        pass
     
     # Exit if config file empty
     configfileempty = True
@@ -1041,14 +1108,14 @@ def main(argv):
     
     # Config routline
     reboot = False
-    reboot = reboot or setup_system(configfile)
-    reboot = reboot or setup_screen(configfile)
-    reboot = reboot or setup_wired(configfile)
-    reboot = reboot or setup_wireless(configfile)
-    reboot = reboot or setup_localization(configfile)
-    reboot = reboot or setup_apt(configfile)
-    reboot = reboot or setup_remote(configfile)
-    reboot = reboot or setup_simpchinese(configfile)
+    reboot = setup_system(configfile) or reboot
+    reboot = setup_screen(configfile) or reboot
+    reboot = setup_wired(configfile) or reboot
+    reboot = setup_wireless(configfile) or reboot
+    reboot = setup_localization(configfile) or reboot
+    reboot = setup_apt(configfile) or reboot
+    reboot = setup_remote(configfile) or reboot
+    reboot = setup_simpchinese(configfile) or reboot
     
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
