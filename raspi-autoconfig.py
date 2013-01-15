@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-# raspi-autoconfig 1.0.2
+# raspi-autoconfig 1.0.3
 #
 # Automatic (non-interactive) config tool for Raspbian on Raspberry Pi(R) 
 # ARM computer. 
@@ -439,7 +439,7 @@ def remote_vnc_autorun_uninst():
             os.remove(full_path)
 # end of remote_vnc_autorun_uninst()
 
-def restore_inittab()
+def restore_inittab():
     inittab_text = open('/etc/inittab', 'r').read()
     
     import re
@@ -1018,12 +1018,12 @@ def main(argv):
     else:
         configfilepath = sys.argv[1]
     configfile = loadconfig(configfilepath)
-    configfiletext = open(configfilepath, 'r').read()
-    
     if not configfile:
-        sys.stderr.write('Notice: autoconfig.ini file not found or unable ' + \
+        sys.stderr.write('Notice: autoconfig.ini file not found or ' + \
             'unable to be read. \n')
         return 2
+    else:
+        configfiletext = open(configfilepath, 'r').read()
     
     # Exit if config file empty
     configfileempty = True
