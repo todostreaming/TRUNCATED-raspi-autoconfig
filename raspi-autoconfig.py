@@ -439,6 +439,21 @@ def remote_vnc_autorun_uninst():
             os.remove(full_path)
 # end of remote_vnc_autorun_uninst()
 
+def restore_inittab()
+    inittab_text = open('/etc/inittab', 'r').read()
+    
+    import re
+    patt = '^(\\s*#)(?P<cmd>.*)(#\\s*RPICFG_TO_ENABLE).*$'
+    repl = '\g<cmd>'
+    inittab_text = re.sub(patt, repl, inittab_text, flags=re.M)
+    
+    patt = '\\n(.*)(#\\s*RPICFG_TO_DISABLE).*'
+    repl = ''
+    inittab_text = re.sub(patt, repl, inittab_text)
+    
+    open('/etc/inittab', 'w').write(inittab_text)
+# end of restore_inittab()
+
 ############################################################
 ############# C O N F I G   F U N C T I O N S  #############
 ############################################################
@@ -1037,6 +1052,10 @@ def main(argv):
     
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
+    
+    # Restore raspi-config customized /etc/inittab to normal
+    # (Enable RPICFG_TO_ENABLE line, disable RPICFG_TO_DISABLE line)
+    restore_inittab()
     
     # Reboot
     if reboot:
