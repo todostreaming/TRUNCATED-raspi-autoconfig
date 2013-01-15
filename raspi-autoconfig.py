@@ -1006,8 +1006,9 @@ def main(argv):
     configfiletext = open(configfilepath, 'r').read()
     
     if not configfile:
-        sys.stderr.write('ERROR: autoconfig.ini file read error. \n')
-        return 1
+        sys.stderr.write('Notice: autoconfig.ini file not found or unable ' + \
+            'unable to be read. \n')
+        return 2
     
     # Exit if config file empty
     configfileempty = True
@@ -1018,7 +1019,7 @@ def main(argv):
     if configfileempty:
         sys.stderr.write('Notice: raspi-autoconfig is not run, because ' + \
             'autoconfig.ini file is empty. \n')
-        return 0
+        return 2
     
     # Else, start program
     sys.stdout.write(RPAC_SPLASH_STRING)
@@ -1052,6 +1053,7 @@ def main(argv):
         sys.stdout.write('SYSTEM IS GOING TO REBOOT IN 5 SECONDS. \n')
         import subprocess
         subprocess.call(['sleep', '5'])
+        subprocess.call(['sync'])
         subprocess.call(['reboot'])
         return 0
     
