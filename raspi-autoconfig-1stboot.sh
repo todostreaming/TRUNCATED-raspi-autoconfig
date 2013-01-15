@@ -14,5 +14,8 @@ if [ $(id -u) -ne 0 ]; then
   printf "\nNOTICE: the software on this Raspberry Pi has not been fully configured. Please run 'sudo raspi-autoconfig'. \n\n"
 else
   raspi-autoconfig
+  if [ $? -ne 0 ]; then
+    raspi-config
+  fi
   exec login -f pi
 fi
