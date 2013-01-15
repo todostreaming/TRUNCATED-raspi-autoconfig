@@ -1038,14 +1038,6 @@ def main(argv):
     # Normal Exit
     sys.stdout.write('All configuration completed. \n')
     
-    # Truncate autoconfig.ini file (comment out every valid line)
-    import re
-    patt = '^[^#;\\s]*[a-zA-Z0-9_\\[\\]\\=].*$'
-    repl = '#\\g<0>'
-    configfiletext = re.sub(patt, repl, configfiletext, flags=re.M)
-    #  DOS/Windows newline for Windows compatibility
-    open(configfilepath, 'w', newline='\r\n').write(configfiletext)
-    
     # Reboot
     if reboot:
         sys.stdout.write('NOTICE: Reboot is needed for some configuration ' + \
